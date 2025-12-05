@@ -6,7 +6,7 @@
 
 ## What is Fuzzy Search with pg_trgm?
 
-Fuzzy search is all about finding what you meant (not just what you typed). Instead of demanding exact matches, it uncovers results that are close enough to feel natural. With PostgreSQL’s pg_trgm extension, you gain a powerful way to match strings using trigram-based similarity algorithms. This means your searches can handle typos, accents, and partial words, delivering smarter and more human‑like results.
+**Fuzzy search** is all about finding what you meant (not just what you typed). Instead of demanding exact matches, it uncovers results that are close enough to feel natural. With PostgreSQL’s **pg_trgm** extension, you gain a powerful way to match strings using trigram-based similarity algorithms. This means your searches can handle typos, accents, and partial words, delivering smarter and more human‑like results.
 
 ### How it Works
 
