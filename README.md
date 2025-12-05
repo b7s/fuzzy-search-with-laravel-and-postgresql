@@ -1,7 +1,7 @@
 # Fuzzy Search with PostgreSQL pg_trgm in Laravel
 
 <div align="center">
-  <img src="fuzzy-search-with-laravel-and-postgresql.webp">
+  <img src="fuzzy-search-with-laravel-and-postgresql.webp?_=1" width="99%">
 </div>
 
 ## What is Fuzzy Search with pg_trgm?
