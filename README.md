@@ -16,7 +16,7 @@
 
 The extension compares trigrams between strings to calculate similarity scores (0 to 1, where 1 is identical).
 
-### Key Functions
+### Functions we will use
 
 1. **`similarity(text1, text2)`**: Compares entire strings
    - Returns: 0.0 to 1.0
@@ -27,7 +27,7 @@ The extension compares trigrams between strings to calculate similarity scores (
    - Example: `word_similarity('joao', 'João da Silva')` = 0.4
    - **Better for partial matches**
 
-### Benefits
+### Why?
 
 - **Typo tolerance**: "dentista" matches "dntista"
 - **Accent insensitive**: "joao" matches "João"
@@ -115,7 +115,6 @@ declare(strict_types=1);
 
 namespace App\Services;
 
-use Illuminate\Support\Collection;
 use Illuminate\Database\Eloquent\Builder;
 
 class FuzzySearchService
