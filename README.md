@@ -113,50 +113,53 @@ return new class extends Migration
 
 declare(strict_types=1);
 
-namespace App\Services\Search;
+namespace App\Services;
 
-use App\Models\Contact;
 use Illuminate\Support\Collection;
+use Illuminate\Database\Eloquent\Builder;
 
 class FuzzySearchService
 {
     private const MIN_SIMILARITY = 0.2;
     private const MIN_WORD_SIMILARITY = 0.3;
 
-    /**
-     * @return Collection<int, Contact>
+     /**
+     * @param  array<int, string>  $fields
      */
-    public function searchContacts(string $searchTerm): Collection
+    public function applyFuzzySearch(Builder $query, string $searchTerm, array $fields): Builder
     {
-        $searchLower = mb_strtolower($searchTerm);
+        $this->normalizeSearchTerm($searchTerm);
 
-        // Try exact/partial match first (faster)
-        $exactMatch = Contact::query()
-            ->whereRaw('LOWER(name) LIKE ?', ["%{$searchLower}%"])
-            ->get();
+        return $query->where(function ($q) use ($searchTerm, $fields): void
+        {
+            foreach ($fields as $field) {
+                $q->orWhereRaw("LOWER({$field}) LIKE ?", ["%{$searchTerm}%"])
+                    ->orWhereRaw("word_similarity(?, LOWER({$field})) > ?", [$searchTerm, self::MIN_WORD_SIMILARITY])
+                    ->orWhereRaw("similarity(LOWER({$field}), ?) > ?", [$searchTerm, self::MIN_SIMILARITY]);
+            }
+        });
+    }
 
-        if ($exactMatch->isNotEmpty()) {
-            return $exactMatch;
-        }
+    public function applyFuzzySearchWithRelevance(Builder $query, string $searchTerm, string $field): Builder
+    {
+        $this->normalizeSearchTerm($searchTerm);
 
-        // Fall back to fuzzy search
-        return Contact::query()
-            ->selectRaw(
-                '*, GREATEST(
-                    word_similarity(?, LOWER(name)),
-                    similarity(LOWER(name), ?)
-                ) as relevance',
-                [$searchLower, $searchLower]
-            )
-            ->where(function ($q) use ($searchLower): void {
-                $q->whereRaw('word_similarity(?, LOWER(name)) > ?', 
-                    [$searchLower, self::MIN_WORD_SIMILARITY])
-                  ->orWhereRaw('similarity(LOWER(name), ?) > ?', 
-                    [$searchLower, self::MIN_SIMILARITY]);
-            })
-            ->orderByDesc('relevance')
-            ->limit(10)
-            ->get();
+        return $query->selectRaw(
+            "GREATEST(
+                word_similarity(?, LOWER({$field})),
+                similarity(LOWER({$field}), ?)
+            ) as relevance",
+            [$searchTerm, $searchTerm]
+        )
+            ->where(function ($q) use ($searchTerm, $field): void {
+                $q->whereRaw("word_similarity(?, LOWER({$field})) > ?", [$searchTerm, self::MIN_WORD_SIMILARITY])
+                    ->orWhereRaw("similarity(LOWER({$field}), ?) > ?", [$searchTerm, self::MIN_CONTACT_SIMILARITY]);
+            });
+    }
+
+    private function normalizeSearchTerm(string &$term): string
+    {
+        return mb_strtolower(trim(preg_replace('/\s+/', ' ', $term) ?? ''));
     }
 }
 ```
@@ -164,9 +167,28 @@ class FuzzySearchService
 ### 4. Usage Examples
 
 ```php
-// Basic search
-$service = new FuzzySearchService();
-$contacts = $service->searchContacts('joao');
+<?php
+
+declare(strict_types=1);
+
+use App\Models\Client;
+use App\Models\Contact;
+use App\Services\FuzzySearchService;
+
+// ...
+
+$fuzzy = new FuzzySearchService();
+
+$query = Client::query()
+            ->where('status', '!=', ClientStatusEnum::Cancelled);
+
+// Add Fuzzy search service to query
+$contacts = $fuzzy->applyFuzzySearch(
+            query: $query,
+            searchTerm: $searchLower,
+            fields: ['name', 'description']
+        )
+        ->get();
 // Finds: "João", "João Silva", "Joana", etc.
 
 // Raw query example
