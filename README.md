@@ -113,37 +113,77 @@ return new class extends Migration
 
 declare(strict_types=1);
 
-namespace App\Services;
+namespace App\Services\Search;
 
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Collection;
 
 class FuzzySearchService
 {
     private const MIN_SIMILARITY = 0.2;
+
     private const MIN_WORD_SIMILARITY = 0.3;
 
-     /**
-     * @param  array<int, string>  $fields
-     */
-    public function applyFuzzySearch(Builder $query, string $searchTerm, array $fields): Builder
-    {
-        $this->normalizeSearchTerm($searchTerm);
+    private Builder $query;
 
-        return $query->where(function ($q) use ($searchTerm, $fields): void
-        {
-            foreach ($fields as $field) {
-                $q->orWhereRaw("LOWER({$field}) LIKE ?", ["%{$searchTerm}%"])
-                    ->orWhereRaw("word_similarity(?, LOWER({$field})) > ?", [$searchTerm, self::MIN_WORD_SIMILARITY])
-                    ->orWhereRaw("similarity(LOWER({$field}), ?) > ?", [$searchTerm, self::MIN_SIMILARITY]);
-            }
-        });
+    public function __construct(?Builder $query)
+    {
+        $this->query = $query;
     }
 
-    public function applyFuzzySearchWithRelevance(Builder $query, string $searchTerm, string $field): Builder
+    public function query(Builder $query): self
     {
-        $this->normalizeSearchTerm($searchTerm);
+        $this->query = $query;
 
-        return $query->selectRaw(
+        return $this;
+    }
+
+    /**
+     * @param  array<int, string>  $fields
+     */
+    public function search(
+        string $searchTerm,
+        array $fields,
+        float $minWordSimilarity = self::MIN_WORD_SIMILARITY,
+        float $minSimilarity = self::MIN_SIMILARITY
+    ): self {
+        $this->query->where(function ($q) use ($searchTerm, $fields, $minWordSimilarity, $minSimilarity): void {
+            foreach ($fields as $field) {
+                $q->orWhereRaw("LOWER({$field}) LIKE ?", ["%{$searchTerm}%"])
+                    ->orWhereRaw("word_similarity(?, LOWER({$field})) > ?", [$searchTerm, $minWordSimilarity])
+                    ->orWhereRaw("similarity(LOWER({$field}), ?) > ?", [$searchTerm, $minSimilarity]);
+            }
+        });
+
+        return $this;
+    }
+
+    /**
+     * @param  array<int, string>  $fields
+     */
+    public function orderByRelevance(string $searchTerm, array $fields): self
+    {
+        $searchLower = $this->normalizeSearchTerm($searchTerm);
+        $bindings = [];
+        $expressions = [];
+
+        foreach ($fields as $field) {
+            $expressions[] = "COALESCE(word_similarity(?, LOWER({$field})), 0)";
+            $expressions[] = "COALESCE(similarity(LOWER({$field}), ?), 0)";
+            $bindings[] = $searchLower;
+            $bindings[] = $searchLower;
+        }
+
+        $sql = 'GREATEST('.implode(', ', $expressions).') DESC';
+
+        $this->query->orderByRaw($sql, $bindings);
+
+        return $this;
+    }
+
+    public function searchWithRelevance(string $searchTerm, string $field): self
+    {
+        $this->query->selectRaw(
             "GREATEST(
                 word_similarity(?, LOWER({$field})),
                 similarity(LOWER({$field}), ?)
@@ -152,13 +192,58 @@ class FuzzySearchService
         )
             ->where(function ($q) use ($searchTerm, $field): void {
                 $q->whereRaw("word_similarity(?, LOWER({$field})) > ?", [$searchTerm, self::MIN_WORD_SIMILARITY])
-                    ->orWhereRaw("similarity(LOWER({$field}), ?) > ?", [$searchTerm, self::MIN_CONTACT_SIMILARITY]);
+                    ->orWhereRaw("similarity(LOWER({$field}), ?) > ?", [$searchTerm, self::MIN_SIMILARITY]);
             });
+
+        return $this;
     }
 
-    private function normalizeSearchTerm(string &$term): string
+    public function normalizeSearchTerm(string $term): string
     {
         return mb_strtolower(trim(preg_replace('/\s+/', ' ', $term) ?? ''));
+    }
+
+    /**
+     * Convert Fuzzy object to Eloquent Builder
+     */
+    public function toQuery(): Builder
+    {
+        return $this->query;
+    }
+
+    /**
+     * Execute query and return results
+     */
+    public function get(): Collection
+    {
+        return $this->query->get();
+    }
+
+    /**
+     * @return Collection<int, string>
+     */
+    public function findContactPhoneIds(\App\Models\User $user, string $contactName): Collection
+    {
+        $searchTerm = $this->normalizeSearchTerm($contactName);
+
+        if ($searchTerm === '') {
+            return collect();
+        }
+
+        return \App\Models\Contact::forUser($user->id)
+            ->where(function ($query) use ($searchTerm): void {
+                $query->whereRaw('LOWER(contact_name) LIKE ?', ["%{$searchTerm}%"])
+                    ->orWhereRaw('word_similarity(?, LOWER(contact_name)) > ?', [$searchTerm, self::MIN_WORD_SIMILARITY])
+                    ->orWhereRaw('similarity(LOWER(contact_name), ?) > ?', [$searchTerm, self::MIN_SIMILARITY]);
+            })
+            ->orderByRaw(
+                'GREATEST(
+                    COALESCE(word_similarity(?, LOWER(contact_name)), 0),
+                    COALESCE(similarity(LOWER(contact_name), ?), 0)
+                ) DESC',
+                [$searchTerm, $searchTerm]
+            )
+            ->pluck('contact_phone_id');
     }
 }
 ```
@@ -181,9 +266,11 @@ $fuzzy = new FuzzySearchService();
 $query = Client::query()
             ->where('status', '!=', ClientStatusEnum::Cancelled);
 
+$searchLower = 'Some Text to find';
+
 // Add Fuzzy search service to query
-$contacts = $fuzzy->applyFuzzySearch(
-            query: $query,
+$contacts = $fuzzy->query($query)
+        ->search(
             searchTerm: $searchLower,
             fields: ['name', 'description']
         )
