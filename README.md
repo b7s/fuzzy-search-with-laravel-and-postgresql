@@ -218,33 +218,6 @@ class FuzzySearchService
     {
         return $this->query->get();
     }
-
-    /**
-     * @return Collection<int, string>
-     */
-    public function findContactPhoneIds(\App\Models\User $user, string $contactName): Collection
-    {
-        $searchTerm = $this->normalizeSearchTerm($contactName);
-
-        if ($searchTerm === '') {
-            return collect();
-        }
-
-        return \App\Models\Contact::forUser($user->id)
-            ->where(function ($query) use ($searchTerm): void {
-                $query->whereRaw('LOWER(contact_name) LIKE ?', ["%{$searchTerm}%"])
-                    ->orWhereRaw('word_similarity(?, LOWER(contact_name)) > ?', [$searchTerm, self::MIN_WORD_SIMILARITY])
-                    ->orWhereRaw('similarity(LOWER(contact_name), ?) > ?', [$searchTerm, self::MIN_SIMILARITY]);
-            })
-            ->orderByRaw(
-                'GREATEST(
-                    COALESCE(word_similarity(?, LOWER(contact_name)), 0),
-                    COALESCE(similarity(LOWER(contact_name), ?), 0)
-                ) DESC',
-                [$searchTerm, $searchTerm]
-            )
-            ->pluck('contact_phone_id');
-    }
 }
 ```
 
